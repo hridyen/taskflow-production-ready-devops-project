@@ -47,6 +47,13 @@ services:
 
     restart: unless-stopped # Always restart unless manually stopped
 
+    # Added healthcheck to check if the backend is healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9001/api/db-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s   
 
 
     environment:

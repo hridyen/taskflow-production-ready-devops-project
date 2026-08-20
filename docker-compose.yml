@@ -1,0 +1,106 @@
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: taskflow-postgres
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+    
+    secrets:
+      - db_password
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d taskflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  backend:
+    build:
+      context: ./backend # Build from the backend directory
+      dockerfile: Dockerfile # Use the Dockerfile in the backend directory
+
+    container_name: taskflow-backend
+    
+    cap_drop:
+      - ALL # Drop all capabilities to improve security
+    
+    security_opt:
+      - no-new-privileges:true # Prevent container from gaining new privileges
+
+    read_only: true # Make the container read-only to prevent file system modifications
+    
+    tmpfs:  # Use tmpfs for temporary files
+      - /tmp 
+
+    mem_limit: 512m # Limit memory usage
+    cpus: 0.5 # Limit CPU usage
+    pids_limit: 100 # Limit the number of processes
+
+    restart: unless-stopped # Always restart unless manually stopped
+
+
+
+    environment:
+      PORT: ${PORT}
+      NODE_ENV: production
+
+      DATABASE_HOST: ${DATABASE_HOST}
+      DATABASE_PORT: ${DATABASE_PORT}
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD_FILE: /run/secrets/db_password
+
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    secrets:
+      - db_password
+
+
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL} 
+
+    container_name: taskflow-frontend
+
+    depends_on:
+      - backend
+  
+  nginx:
+    image: nginx:alpine
+    container_name: taskflow-nginx
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+    depends_on:
+      - frontend
+      - backend
+
+
+volumes:
+  postgres_data:
+
+
+secrets:
+  db_password:
+    file: ./secrets/db_password

@@ -1,0 +1,20 @@
+# PostgreSQL
+POSTGRES_DB=taskflow
+POSTGRES_USER=your_database_user
+POSTGRES_PASSWORD=your_database_password
+
+# Backend
+PORT=9001
+NODE_ENV=production
+
+DATABASE_HOST=postgres
+DATABASE_PORT=5432
+DATABASE_NAME=taskflow
+DATABASE_USER=your_database_user
+DATABASE_PASSWORD=your_database_password
+
+# Frontend
+VITE_API_URL=/api
+
+# CORS
+CORS_ORIGIN=http://localhost

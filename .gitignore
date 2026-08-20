@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.*
+!.env.example
+secrets/*
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+secrets/
+*.pem
+*.key

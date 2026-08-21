@@ -1,21 +1,37 @@
+# ==========================================
+# TaskFlow DevOps Orchestration: Docker Compose
+# ==========================================
+# This file orchestrates four services (Postgres, Backend, Frontend, and Nginx)
+# to spin up the local production environment.
+# It enforces strict security controls and container boundaries for cloud deployments.
+
 services:
 
+  # ----------------------------------------------------
+  # 1. Database Service: Postgres
+  # ----------------------------------------------------
   postgres:
+    # Use alpine-based official PostgreSQL 17 image to keep the container size small
     image: postgres:17-alpine
     container_name: taskflow-postgres
 
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
+      # Load password from Docker Secrets file mount instead of storing in plain-text envs
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
 
     volumes:
+      # Mount initialization script. Docker automatically runs any .sql script here on first startup
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      # Persist PostgreSQL data on the host machine across container restarts
       - postgres_data:/var/lib/postgresql/data
     
     secrets:
       - db_password
 
+    # Health check definition: ensures Postgres is fully ready to accept connections
+    # before dependent services (like the backend) attempt to start up.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d taskflow"]
       interval: 5s
@@ -23,6 +39,9 @@ services:
       retries: 10
 
 
+  # ----------------------------------------------------
+  # 2. Backend Service: Express Node.js API
+  # ----------------------------------------------------
   backend:
     build:
       context: ./backend # Build from the backend directory
@@ -30,24 +49,29 @@ services:
 
     container_name: taskflow-backend
     
+    # SECURITY HARDENING: Drop all kernel capabilities (drops root capabilities like chown, kill, etc.)
     cap_drop:
-      - ALL # Drop all capabilities to improve security
+      - ALL
     
+    # SECURITY HARDENING: Prevents processes within the container from gaining new permissions
     security_opt:
-      - no-new-privileges:true # Prevent container from gaining new privileges
+      - no-new-privileges:true
 
-    read_only: true # Make the container read-only to prevent file system modifications
+    # SECURITY HARDENING: Run container filesystem in read-only mode to prevent script injections
+    read_only: true
     
-    tmpfs:  # Use tmpfs for temporary files
+    # Mount temporary virtual directory in memory to allow Express to write temp files (needed since FS is read_only)
+    tmpfs:
       - /tmp 
 
-    mem_limit: 512m # Limit memory usage
-    cpus: 0.5 # Limit CPU usage
-    pids_limit: 100 # Limit the number of processes
+    # RESOURCE LIMITS: Boundaries to prevent resource starvation / DOS attacks on host machine
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 100
 
-    restart: unless-stopped # Always restart unless manually stopped
+    restart: unless-stopped # Automatically restart container if it crashes (unless manually stopped)
 
-    # Added healthcheck to check if the backend is healthy
+    # Health check definition: checks backend HTTP availability using database health endpoint
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9001/api/db-health"]
       interval: 30s
@@ -55,28 +79,29 @@ services:
       retries: 3
       start_period: 10s   
 
-
     environment:
       PORT: ${PORT}
       NODE_ENV: production
-
       DATABASE_HOST: ${DATABASE_HOST}
       DATABASE_PORT: ${DATABASE_PORT}
       DATABASE_NAME: ${DATABASE_NAME}
       DATABASE_USER: ${DATABASE_USER}
+      # Load password from Docker Secrets file mount instead of storing in plain-text envs
       DATABASE_PASSWORD_FILE: /run/secrets/db_password
-
       CORS_ORIGIN: ${CORS_ORIGIN}
+      
     secrets:
       - db_password
 
-
-
+    # Wait for the PostgreSQL health check to pass before starting backend container
     depends_on:
       postgres:
         condition: service_healthy
 
 
+  # ----------------------------------------------------
+  # 3. Frontend Service: Vite / React / Nginx static host
+  # ----------------------------------------------------
   frontend:
     build:
       context: ./frontend
@@ -86,28 +111,39 @@ services:
 
     container_name: taskflow-frontend
 
+    # Wait for backend API service to spin up before serving the static assets
     depends_on:
       - backend
+
   
+  # ----------------------------------------------------
+  # 4. Reverse Proxy / Gateway Service: Nginx
+  # ----------------------------------------------------
   nginx:
     image: nginx:alpine
     container_name: taskflow-nginx
 
+    # Expose Nginx on port 80 to receive external web traffic
     ports:
       - "80:80"
 
     volumes:
+      # Mount Nginx reverse proxy configuration in read-only mode
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
 
+    # Ensure frontend and backend containers exist before proxying traffic
     depends_on:
       - frontend
       - backend
 
 
+# ----------------------------------------------------
+# Shared Volumes & Secret Definitions
+# ----------------------------------------------------
 volumes:
-  postgres_data:
-
+  postgres_data: # Database persistent storage volume
 
 secrets:
   db_password:
+    # File containing plain-text password, shared securely with postgres and backend containers
     file: ./secrets/db_password

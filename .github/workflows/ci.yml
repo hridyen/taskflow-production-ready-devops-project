@@ -1,0 +1,95 @@
+# ==========================================
+# TaskFlow Continuous Integration (CI) Workflow
+# ==========================================
+# This workflow runs on every push and pull request to the main/master branches.
+# It ensures code quality and build stability across frontend, backend, and infrastructure configuration.
+
+name: TaskFlow CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # ----------------------------------------------------
+  # Frontend CI Job: Verifies linting and compilation
+  # ----------------------------------------------------
+  frontend-check:
+    name: Frontend (Lint & Build)
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Check out the workspace code repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js runtime environment (v22 to match Dockerfile config)
+      # Uses caching for package lock file to accelerate future workflow runs
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # Step 3: Install dependencies using 'npm ci' (ensures clean, reproducible install)
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      # Step 4: Run Oxlint to lint Javascript / JSX files
+      - name: Lint Frontend
+        working-directory: ./frontend
+        run: npm run lint
+
+      # Step 5: Test production Vite compile (ensures build compiles successfully)
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: npm run build
+
+  # ----------------------------------------------------
+  # Backend CI Job: Verifies unit tests and dependencies
+  # ----------------------------------------------------
+  backend-check:
+    name: Backend (Tests)
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Check out the workspace code repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js runtime environment (v22 to match Dockerfile config)
+      # Uses caching for package lock file to accelerate future workflow runs
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      # Step 3: Install dependencies using 'npm ci' (ensures clean, reproducible install)
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      # Step 4: Execute backend tests (using native Node.js test runner)
+      - name: Run Backend Tests
+        working-directory: ./backend
+        run: npm test
+
+  # ----------------------------------------------------
+  # DevOps Job: Validates Docker Compose orchestration file
+  # ----------------------------------------------------
+  docker-compose-check:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Check out the workspace code repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Validate syntax and options of the compose file
+      # This checks that env vars, mount paths, image tags, and parameters are correctly defined
+      - name: Validate Docker Compose Configuration
+        run: docker compose config

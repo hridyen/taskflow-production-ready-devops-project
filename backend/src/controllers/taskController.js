@@ -1,12 +1,26 @@
+// ==========================================
+// TaskFlow Backend Controller: Tasks
+// ==========================================
+// This controller contains the core business logic for executing database operations.
+// Crucial features implemented:
+// 1. Data mapping (DB snake_case fields mapped to CamelCase API responses).
+// 2. Strict UUID format validations to prevent Postgres syntax crash when supplying wrong formats.
+// 3. Dynamic SQL updates where only specified fields are written.
+// 4. Secure SQL parameterization ($1, $2) to completely eliminate SQL injection vectors.
+
 const db = require('../databse');
 
-// Get all tasks (with optional status filtering)
+// ----------------------------------------------------
+// GET /api/tasks (Retrieve all tasks)
+// ----------------------------------------------------
+// Accepts query parameter 'status' (?status=completed) to filter tasks.
 const getTasks = async (req, res, next) => {
   try {
     const { status } = req.query;
     let queryText = 'SELECT * FROM tasks';
     const params = [];
 
+    // Apply conditional status filters to the database query
     if (status) {
       queryText += ' WHERE status = $1';
       params.push(status);
@@ -14,9 +28,10 @@ const getTasks = async (req, res, next) => {
 
     queryText += ' ORDER BY created_at DESC';
 
+    // Execute query with parameterized values
     const result = await db.query(queryText, params);
     
-    // Map database fields to camelCase to match previous API contract
+    // Convert DB schema format (snake_case) to client convention (camelCase)
     const formattedTasks = result.rows.map(task => ({
       id: task.id,
       title: task.title,
@@ -28,16 +43,21 @@ const getTasks = async (req, res, next) => {
 
     res.json(formattedTasks);
   } catch (error) {
+    // Propagate error to global Express error handler
     next(error);
   }
 };
 
-// Get a single task by ID
+// ----------------------------------------------------
+// GET /api/tasks/:id (Retrieve task by ID)
+// ----------------------------------------------------
 const getTaskById = async (req, res, next) => {
   try {
     const { id } = req.params;
     
-    // Check if valid UUID format to avoid Postgres syntax error
+    // Regular expression validation: checks if ID matches valid UUID format.
+    // If not validated beforehand, Postgres throws a fatal query parser exception (500)
+    // rather than letting the application return a clean 400 Bad Request.
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       return res.status(400).json({ error: 'Invalid task ID format' });
@@ -45,6 +65,7 @@ const getTaskById = async (req, res, next) => {
 
     const result = await db.query('SELECT * FROM tasks WHERE id = $1', [id]);
     
+    // Check if task exists in database
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Task not found' });
     }
@@ -63,15 +84,19 @@ const getTaskById = async (req, res, next) => {
   }
 };
 
-// Create a new task
+// ----------------------------------------------------
+// POST /api/tasks (Create a new task)
+// ----------------------------------------------------
 const createTask = async (req, res, next) => {
   try {
     const { title, description } = req.body;
 
+    // Validate request constraints
     if (!title) {
       return res.status(400).json({ error: 'Title is required' });
     }
 
+    // Default tasks are created with a status of 'pending'
     const queryText = `
       INSERT INTO tasks (title, description, status)
       VALUES ($1, $2, 'pending')
@@ -93,18 +118,22 @@ const createTask = async (req, res, next) => {
   }
 };
 
-// Update an existing task
+// ----------------------------------------------------
+// PUT /api/tasks/:id (Update task properties)
+// ----------------------------------------------------
+// Supports updating partial sets of fields (title, description, status).
 const updateTask = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, description, status } = req.body;
 
+    // Validate ID before issuing SQL queries
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       return res.status(400).json({ error: 'Invalid task ID format' });
     }
 
-    // Validate status if provided
+    // Validate state transition limits if 'status' field is passed
     if (status !== undefined) {
       const validStatuses = ['pending', 'in-progress', 'completed'];
       if (!validStatuses.includes(status)) {
@@ -112,7 +141,8 @@ const updateTask = async (req, res, next) => {
       }
     }
 
-    // Build dynamic update
+    // Dynamically build UPDATE query depending on fields provided in the body payload.
+    // This avoids overwriting fields with undefined/null.
     const fields = [];
     const values = [];
     let idx = 1;
@@ -130,8 +160,8 @@ const updateTask = async (req, res, next) => {
       values.push(status);
     }
 
+    // If payload is empty, fetch the original task details and return them
     if (fields.length === 0) {
-      // Nothing to update, return the current task
       const result = await db.query('SELECT * FROM tasks WHERE id = $1', [id]);
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Task not found' });
@@ -147,6 +177,7 @@ const updateTask = async (req, res, next) => {
       });
     }
 
+    // Append ID as final parameter value in dynamically constructed list
     values.push(id);
     const queryText = `
       UPDATE tasks 
@@ -175,11 +206,14 @@ const updateTask = async (req, res, next) => {
   }
 };
 
-// Delete a task
+// ----------------------------------------------------
+// DELETE /api/tasks/:id (Delete task)
+// ----------------------------------------------------
 const deleteTask = async (req, res, next) => {
   try {
     const { id } = req.params;
 
+    // Validate ID before executing SQL
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       return res.status(400).json({ error: 'Invalid task ID format' });

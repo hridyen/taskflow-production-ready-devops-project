@@ -1,33 +1,52 @@
+// ==========================================
+// TaskFlow Frontend: Main Application React Component
+// ==========================================
+// This is the core orchestrator of the React user interface.
+// Key engineering patterns utilized:
+// 1. Asynchronous state managers using useEffect and useCallback hooks.
+// 2. Optimistic UI Updates: UI responds instantly to drag-and-drop or quick status actions,
+//    reverting state seamlessly in case of network failures.
+// 3. Periodic Background Verification: Checks database health every 30s dynamically.
+// 4. Interactive UX Feedbacks: Toast notification timers and local error handlers.
+
 import { useState, useEffect, useCallback } from 'react';
 import { api } from './services/api';
 import TaskForm from './components/TaskForm';
 import TaskList from './components/TaskList';
 
 export default function App() {
-  const [tasks, setTasks] = useState([]);
-  const [editingTask, setEditingTask] = useState(null);
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  // ----------------------------------------------------
+  // React State Hook Definitions
+  // ----------------------------------------------------
+  const [tasks, setTasks] = useState([]); // List of task entities
+  const [editingTask, setEditingTask] = useState(null); // Active task object in edit panel
+  const [filterStatus, setFilterStatus] = useState('all'); // Active status filter state
+  const [searchQuery, setSearchQuery] = useState(''); // Text search query filter
   
-  // Status & UI States
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [dbHealthy, setDbHealthy] = useState('checking'); // 'checking' | 'healthy' | 'unhealthy'
-  const [errorMessage, setErrorMessage] = useState('');
-  const [toasts, setToasts] = useState([]);
+  // UI Loading and Monitoring Status States
+  const [isLoading, setIsLoading] = useState(true); // Initial fetch loading flag
+  const [isSubmitting, setIsSubmitting] = useState(false); // Form save operations load flag
+  const [dbHealthy, setDbHealthy] = useState('checking'); // Connection health indicator state
+  const [errorMessage, setErrorMessage] = useState(''); // Global error notification message
+  const [toasts, setToasts] = useState([]); // Array of active toast notifications
 
-  // Helper to add toast messages
+  // ----------------------------------------------------
+  // UX Helper: Toast Notifications Manager
+  // ----------------------------------------------------
+  // Spawns transient messages and schedules auto-removal to avoid memory leaks.
   const addToast = useCallback((type, message) => {
     const id = Date.now() + Math.random().toString(36).substr(2, 5);
     setToasts((prev) => [...prev, { id, type, message }]);
     
-    // Auto-remove toast after 4 seconds
+    // Auto-remove toast message after 4 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 4000);
   }, []);
 
-  // Fetch all tasks from server
+  // ----------------------------------------------------
+  // API Fetch Action: Load Task Records
+  // ----------------------------------------------------
   const loadTasks = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     setErrorMessage('');
@@ -43,7 +62,9 @@ export default function App() {
     }
   }, [addToast]);
 
-  // Check API health
+  // ----------------------------------------------------
+  // API Fetch Action: Verify Connection Health
+  // ----------------------------------------------------
   const checkHealth = useCallback(async () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:9001/api'}/db-health`);
@@ -57,35 +78,40 @@ export default function App() {
     }
   }, []);
 
-  // Initial load
+  // ----------------------------------------------------
+  // Component Lifecycle: Initial mounting and Polling
+  // ----------------------------------------------------
   useEffect(() => {
     checkHealth();
     loadTasks();
 
-    // Check database health periodically every 30 seconds
+    // Check database connection health periodically (every 30 seconds)
     const interval = setInterval(() => {
       checkHealth();
     }, 30000);
 
+    // Cleanup interval timer on component unmount to prevent background executions
     return () => clearInterval(interval);
   }, [loadTasks, checkHealth]);
 
-  // Form submission handler (create or update)
+  // ----------------------------------------------------
+  // CRUD Action: Create or Update Submission Handler
+  // ----------------------------------------------------
   const handleSubmitTask = async (taskData) => {
     setIsSubmitting(true);
     setErrorMessage('');
     try {
       if (editingTask) {
-        // Edit Mode
+        // Update Action: PUT task endpoint
         const updated = await api.updateTask(editingTask.id, taskData);
         addToast('success', `Task "${updated.title}" updated successfully!`);
         setEditingTask(null);
       } else {
-        // Create Mode
+        // Create Action: POST task endpoint
         const created = await api.createTask(taskData);
         addToast('success', `Task "${created.title}" created successfully!`);
       }
-      // Reload tasks list
+      // Re-trigger server sync silently (keep current UI lists loaded)
       await loadTasks(true);
     } catch (err) {
       console.error(err);
@@ -96,15 +122,16 @@ export default function App() {
     }
   };
 
-  // Delete task handler
+  // ----------------------------------------------------
+  // CRUD Action: Delete Handler
+  // ----------------------------------------------------
   const handleDeleteTask = async (id) => {
     setErrorMessage('');
     try {
-      // Find the task name for the toast
       const taskToDelete = tasks.find(t => t.id === id);
       const title = taskToDelete ? taskToDelete.title : 'Task';
 
-      // Perform deletion
+      // Perform HTTP DELETE operation
       await api.deleteTask(id);
       addToast('success', `Task "${title}" deleted.`);
       
@@ -121,9 +148,12 @@ export default function App() {
     }
   };
 
-  // Status Change Quick Action
+  // ----------------------------------------------------
+  // Quick Action: Status updates (Optimistic Pattern)
+  // ----------------------------------------------------
   const handleStatusChange = async (id, newStatus) => {
-    // Optimistic local state update
+    // 1. Optimistic Update: Modify local state before sending HTTP request
+    // This makes the transition feel instantaneous for the end-user
     const previousTasks = [...tasks];
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, status: newStatus } : t))
@@ -133,19 +163,20 @@ export default function App() {
       const updated = await api.updateTask(id, { status: newStatus });
       addToast('info', `Status of "${updated.title}" changed to ${newStatus.replace('-', ' ')}.`);
       
-      // Fetch latest from database silently to ensure synchronization
+      // Re-fetch in background to synchronize any changes (timestamps, etc.)
       loadTasks(true);
     } catch (err) {
       console.error(err);
       addToast('error', 'Failed to update status on server.');
-      // Rollback on error
+      
+      // 2. Rollback Action: Restore original tasks list if the API fails
       setTasks(previousTasks);
     }
   };
 
   return (
     <div className="app-container">
-      {/* App Header */}
+      {/* ----------------- Header Section ----------------- */}
       <header className="app-header">
         <div className="brand-section">
           <div className="brand-logo">TF</div>
@@ -155,6 +186,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* Database Health Status Indicator */}
         <div className="db-status">
           <span className={`status-dot ${dbHealthy}`}></span>
           <span>
@@ -165,7 +197,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* API Error Banner */}
+      {/* ----------------- Connection Error Banner ----------------- */}
       {errorMessage && (
         <div className="alert-banner error" role="alert">
           <span><strong>Connection Alert:</strong> {errorMessage}</span>
@@ -173,9 +205,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Grid Content */}
+      {/* ----------------- Main Layout Grid ----------------- */}
       <main style={{ gridColumn: 1 / -1, display: 'contents' }}>
-        {/* Left Side: Create / Edit Form */}
+        {/* Left column: Create & Update Form */}
         <section aria-label="Task Form Panel">
           <TaskForm
             editingTask={editingTask}
@@ -185,7 +217,7 @@ export default function App() {
           />
         </section>
 
-        {/* Right Side: Tasks List View */}
+        {/* Right column: Interactive Filterable Task List */}
         <section aria-label="Tasks List View">
           <div className="glass-panel">
             <h2 className="panel-title">
@@ -208,7 +240,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* Dynamic Toast Notifications */}
+      {/* ----------------- Dynamic Toast Notifications ----------------- */}
       <div className="toast-container" aria-live="polite">
         {toasts.map((toast) => (
           <div key={toast.id} className={`toast ${toast.type}`}>

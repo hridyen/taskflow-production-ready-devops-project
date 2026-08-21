@@ -1,30 +1,48 @@
+// ==========================================
+// TaskFlow Express API Server Entrypoint
+// ==========================================
+// This is the core entrypoint for the backend Node.js API application.
+// It configures middleware, defines health check endpoints, loads route controllers,
+// and manages global error-handling lifecycles.
+
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+require('dotenv').config(); // Load environment variables from .env file
 
 const taskRoutes = require('./routes/taskRoutes');
-const db = require('./databse');
+const db = require('./databse'); // Import database configuration
 
 const app = express();
+// Default port is set to 9001. This is exposed in the Docker container and proxied by Nginx
 const PORT = process.env.PORT || 9001;
 
-// Enable CORS
+// ----------------------------------------------------
+// Global Middleware Config
+// ----------------------------------------------------
+
+// Configure Cross-Origin Resource Sharing (CORS) options
+// Allows controlled requests from our frontend application (specified in CORS_ORIGIN)
 const corsOptions = {
   origin: process.env.CORS_ORIGIN || '*',
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
 
-// Built-in body parsers
+// Built-in JSON body parser middleware to parse incoming request payloads
 app.use(express.json());
+// Built-in urlencoded parser to support HTML form submissions if needed
 app.use(express.urlencoded({ extended: true }));
 
-// Root route
+// ----------------------------------------------------
+// Core & Health Check Endpoints
+// ----------------------------------------------------
+
+// Root route: provides basic entrypoint verification
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to the TaskFlow API' });
 });
 
-// General API Health Check
+// General API Health Check: used by monitoring tools to check container status
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
@@ -33,10 +51,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Database Health Check
+// Database Health Check: verifies Postgres availability by executing a simple query.
+// This endpoint is critical for the Docker Compose healthcheck definition
 app.get('/api/db-health', async (req, res) => {
   try {
-    // Run simple query to check DB availability
+    // Run simple query to check DB connectivity
     await db.query('SELECT 1');
     res.status(200).json({
       success: true,
@@ -53,21 +72,37 @@ app.get('/api/db-health', async (req, res) => {
   }
 });
 
-// API Routes
+// ----------------------------------------------------
+// API Route Handlers
+// ----------------------------------------------------
+// All CRUD task endpoints are prefixed with /api/tasks
 app.use('/api/tasks', taskRoutes);
 
-// 404 Not Found handler
+// ----------------------------------------------------
+// Error Handling Middleware
+// ----------------------------------------------------
+
+// Catch-all: 404 Route Not Found handler
 app.use((req, res, next) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Generic 500 Error handler
+// Generic 500: Server Error handler to intercept uncaught errors
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'An internal server error occurred' });
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-});
+// ----------------------------------------------------
+// Server Startup (Conditional execution)
+// ----------------------------------------------------
+// We wrap app.listen in a module check so that it ONLY starts listening when run directly.
+// This allows the test suite to import 'app' without spinning up the network listener or DB pool.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+  });
+}
+
+// Export the app instance for the unit test runner
+module.exports = app;

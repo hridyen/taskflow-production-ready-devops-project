@@ -125,3 +125,46 @@ jobs:
             --build-arg VITE_API_URL=/api \
             -t taskflow-frontend:ci-${{ github.sha }} \
             ./frontend
+      
+    # ----------------------------------------------------
+  # Security Job: Scan Docker images for vulnerabilities
+  # ----------------------------------------------------
+  security-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+
+    needs:
+      - docker-build
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Backend Image
+        run: |
+          docker build \
+            -t taskflow-backend:scan \
+            ./backend
+
+      - name: Build Frontend Image
+        run: |
+          docker build \
+            --build-arg VITE_API_URL=/api \
+            -t taskflow-frontend:scan \
+            ./frontend
+
+      - name: Scan Backend Image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: taskflow-backend:scan
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 1
+
+      - name: Scan Frontend Image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: taskflow-frontend:scan
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 1

@@ -115,7 +115,7 @@ jobs:
       - name: Build Backend Image
         run: |
           docker build \
-            -t taskflow-backend:ci-${{ github.sha }} \
+            -t taskflow-backend:${{ github.sha }} \
             ./backend
 
       # Step 3: Build frontend production image in this the ${{github.sha}} means it is the commit SHA that triggered the workflow.
@@ -123,7 +123,7 @@ jobs:
         run: |
           docker build \
             --build-arg VITE_API_URL=/api \
-            -t taskflow-frontend:ci-${{ github.sha }} \
+            -t taskflow-frontend:${{ github.sha }} \
             ./frontend
       
     # ----------------------------------------------------

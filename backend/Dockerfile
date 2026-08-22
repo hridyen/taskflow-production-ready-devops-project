@@ -16,7 +16,9 @@ COPY package*.json ./
 
 # Step 4: Perform clean install of production-only packages.
 # --omit=dev prevents devDependencies (like nodemon) from being included in the production image.
-RUN npm ci --omit=dev
+RUN npm install -g npm@10.9.9 && \
+    npm ci --omit=dev
+
 
 # Step 5: Drop root privileges and switch context to the built-in non-root 'node' user.
 # Crucial for security compliance to prevent host-access vulnerabilities.

@@ -14,11 +14,11 @@ DROP TABLE IF EXISTS tasks;
 -- Table Definition: tasks
 -- ----------------------------------------------------
 CREATE TABLE tasks (
-    # Use UUID primary keys instead of auto-incrementing integers for distributed scalability and safety
+    -- Use UUID primary keys instead of auto-incrementing integers for distributed scalability and safety
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(255) NOT NULL,
     description TEXT,
-    # Restrict status values using SQL CHECK constraints to enforce database integrity
+    -- Restrict status values using SQL CHECK constraints to enforce database integrity
     status VARCHAR(50) DEFAULT 'pending' NOT NULL CHECK (status IN ('pending', 'in-progress', 'completed')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL

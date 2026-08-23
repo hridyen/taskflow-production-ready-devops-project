@@ -1,31 +1,105 @@
 # ==========================================
-# TaskFlow Continuous Integration (CI) Workflow
+# TaskFlow Continuous Integration (CI)
 # ==========================================
-# This workflow runs on every push and pull request to the main/master branches.
-# It ensures code quality and build stability across frontend, backend, and infrastructure configuration.
+#
+# Overall pipeline:
+#
+# Git Push / Pull Request
+#          ↓
+# ┌─────────────────────────────┐
+# │ Frontend Lint + Build       │
+# │ Backend Tests               │
+# │ Docker Compose Validation   │
+# └──────────────┬──────────────┘
+#                ↓
+#        Docker Image Build
+#                ↓
+#        Trivy Security Scan
+#                ↓
+#        GHCR Push
+#
+# Images are tagged using the Git commit SHA instead of "latest".
+#
+# Example:
+#   ghcr.io/hridyen/taskflow-backend:a3e8ee2...
+#   ghcr.io/hridyen/taskflow-frontend:a3e8ee2...
+#
+# This gives us traceability:
+#
+# Git commit → Docker image → Deployment
+#
+# ==========================================
 
 name: TaskFlow CI
+
+
+# ==========================================
+# WORKFLOW TRIGGERS
+# ==========================================
+#
+# The workflow runs when:
+#
+# 1. Code is pushed to main/master
+# 2. A Pull Request targets main/master
+#
+# ==========================================
 
 on:
   push:
     branches: [ main, master ]
+
   pull_request:
     branches: [ main, master ]
 
+
 jobs:
-  # ----------------------------------------------------
-  # Frontend CI Job: Verifies linting and compilation
-  # ----------------------------------------------------
+
+  # ==========================================================
+  # 1. FRONTEND CI
+  # ==========================================================
+  #
+  # Purpose:
+  # - Install frontend dependencies
+  # - Run linter
+  # - Verify production build
+  #
+  # If any of these fail, this job fails.
+  #
+  # ==========================================================
+
   frontend-check:
+
     name: Frontend (Lint & Build)
+
     runs-on: ubuntu-latest
+
     steps:
-      # Step 1: Check out the workspace code repository
+
+      # ------------------------------------------
+      # Checkout repository
+      # ------------------------------------------
+      #
+      # Downloads our GitHub repository onto
+      # the GitHub Actions runner.
+      #
+      # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js runtime environment (v22 to match Dockerfile config)
-      # Uses caching for package lock file to accelerate future workflow runs
+
+      # ------------------------------------------
+      # Install Node.js 22
+      # ------------------------------------------
+      #
+      # Node.js 22 matches the version used
+      # by our application Docker images.
+      #
+      # npm caching is enabled using the
+      # frontend package-lock.json.
+      #
+      # ------------------------------------------
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -33,34 +107,85 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      # Step 3: Install dependencies using 'npm ci' (ensures clean, reproducible install)
+
+      # ------------------------------------------
+      # Install frontend dependencies
+      # ------------------------------------------
+      #
+      # npm ci:
+      #
+      # - Uses package-lock.json
+      # - Produces reproducible installs
+      # - Removes existing node_modules
+      #
+      # ------------------------------------------
+
       - name: Install Frontend Dependencies
         working-directory: ./frontend
         run: npm ci
 
-      # Step 4: Run Oxlint to lint Javascript / JSX files
+
+      # ------------------------------------------
+      # Run frontend linter
+      # ------------------------------------------
+      #
+      # Oxlint checks the JavaScript/JSX code
+      # for code-quality problems.
+      #
+      # ------------------------------------------
+
       - name: Lint Frontend
         working-directory: ./frontend
         run: npm run lint
 
-      # Step 5: Test production Vite compile (ensures build compiles successfully)
+
+      # ------------------------------------------
+      # Build frontend
+      # ------------------------------------------
+      #
+      # Runs the production Vite build.
+      #
+      # This verifies that the frontend can
+      # actually be compiled successfully.
+      #
+      # ------------------------------------------
+
       - name: Build Frontend
         working-directory: ./frontend
         run: npm run build
 
-  # ----------------------------------------------------
-  # Backend CI Job: Verifies unit tests and dependencies
-  # ----------------------------------------------------
+
+
+  # ==========================================================
+  # 2. BACKEND CI
+  # ==========================================================
+  #
+  # Purpose:
+  # - Install backend dependencies
+  # - Execute automated tests
+  #
+  # ==========================================================
+
   backend-check:
+
     name: Backend (Tests)
+
     runs-on: ubuntu-latest
+
     steps:
-      # Step 1: Check out the workspace code repository
+
+      # ------------------------------------------
+      # Checkout repository
+      # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js runtime environment (v22 to match Dockerfile config)
-      # Uses caching for package lock file to accelerate future workflow runs
+
+      # ------------------------------------------
+      # Install Node.js 22
+      # ------------------------------------------
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -68,103 +193,389 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
-      # Step 3: Install dependencies using 'npm ci' (ensures clean, reproducible install)
+
+      # ------------------------------------------
+      # Install backend dependencies
+      # ------------------------------------------
+
       - name: Install Backend Dependencies
         working-directory: ./backend
         run: npm ci
 
-      # Step 4: Execute backend tests (using native Node.js test runner)
+
+      # ------------------------------------------
+      # Run backend tests
+      # ------------------------------------------
+      #
+      # Uses Node.js native test runner.
+      #
+      # If a test fails, this entire job fails.
+      #
+      # ------------------------------------------
+
       - name: Run Backend Tests
         working-directory: ./backend
         run: npm test
 
-  # ----------------------------------------------------
-  # DevOps Job: Validates Docker Compose orchestration file
-  # ----------------------------------------------------
+
+
+  # ==========================================================
+  # 3. DOCKER COMPOSE VALIDATION
+  # ==========================================================
+  #
+  # Purpose:
+  # Make sure docker-compose.yml is syntactically
+  # and structurally valid before we continue.
+  #
+  # ==========================================================
+
   docker-compose-check:
+
     name: Docker Compose Validation
+
     runs-on: ubuntu-latest
+
     steps:
-      # Step 1: Check out the workspace code repository
+
+      # ------------------------------------------
+      # Checkout repository
+      # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Validate syntax and options of the compose file
-      # This checks that env vars, mount paths, image tags, and parameters are correctly defined
+
+      # ------------------------------------------
+      # Validate Docker Compose configuration
+      # ------------------------------------------
+      #
+      # docker compose config parses the compose
+      # file and validates its configuration.
+      #
+      # It catches many configuration mistakes
+      # before deployment.
+      #
+      # ------------------------------------------
+
       - name: Validate Docker Compose Configuration
         run: docker compose config
-  
-    # ----------------------------------------------------
-  # Docker Job: Builds production container images
-  # ----------------------------------------------------
+
+
+
+  # ==========================================================
+  # 4. DOCKER IMAGE BUILD
+  # ==========================================================
+  #
+  # This job runs ONLY after all three CI checks
+  # have passed.
+  #
+  # needs:
+  #
+  # frontend-check
+  # backend-check
+  # docker-compose-check
+  #
+  # Images are tagged with the Git commit SHA.
+  #
+  # Example:
+  #
+  # taskflow-backend:a3e8ee2...
+  # taskflow-frontend:a3e8ee2...
+  #
+  # Instead of:
+  #
+  # taskflow-backend:latest
+  #
+  # This gives us immutable-ish image identification.
+  #
+  # ==========================================================
+
   docker-build:
+
     name: Docker Image Build
+
     runs-on: ubuntu-latest
+
+
+    # ------------------------------------------
+    # Wait for all CI checks to pass
+    # ------------------------------------------
 
     needs:
       - frontend-check
       - backend-check
       - docker-compose-check
 
+
     steps:
-      # Step 1: Check out repository
+
+      # ------------------------------------------
+      # Checkout repository
+      # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step 2: Build backend production image in this the ${{github.sha}} means it is the commit SHA that triggered the workflow.
+
+      # ------------------------------------------
+      # Build backend Docker image
+      # ------------------------------------------
+      #
+      # github.sha = commit SHA that triggered
+      # this workflow.
+      #
+      # Example:
+      #
+      # taskflow-backend:a3e8ee2...
+      #
+      # ------------------------------------------
+
       - name: Build Backend Image
         run: |
           docker build \
             -t taskflow-backend:${{ github.sha }} \
             ./backend
 
-      # Step 3: Build frontend production image in this the ${{github.sha}} means it is the commit SHA that triggered the workflow.
+
+      # ------------------------------------------
+      # Build frontend Docker image
+      # ------------------------------------------
+      #
+      # VITE_API_URL is supplied as a build
+      # argument because the frontend needs
+      # to know where the API is located.
+      #
+      # ------------------------------------------
+
       - name: Build Frontend Image
         run: |
           docker build \
             --build-arg VITE_API_URL=/api \
             -t taskflow-frontend:${{ github.sha }} \
             ./frontend
-      
-    # ----------------------------------------------------
-  # Security Job: Scan Docker images for vulnerabilities
-  # ----------------------------------------------------
+
+
+
+  # ==========================================================
+  # 5. SECURITY + GHCR PUBLISH
+  # ==========================================================
+  #
+  # This job runs after Docker Image Build.
+  #
+  # Flow:
+  #
+  # Build images
+  #      ↓
+  # Trivy scans images
+  #      ↓
+  # If CRITICAL/HIGH vulnerability exists
+  #      ↓
+  # Pipeline FAILS
+  #
+  # If scan passes:
+  #
+  # Login to GHCR
+  #      ↓
+  # Push images
+  #
+  # IMPORTANT:
+  #
+  # We deliberately authenticate to GHCR AFTER
+  # the security scans.
+  #
+  # Therefore we don't publish an image that
+  # failed our security gate.
+  #
+  # ==========================================================
+
   security-scan:
+
     name: Trivy Security Scan
+
     runs-on: ubuntu-latest
+
+
+    # ------------------------------------------
+    # GitHub Actions permissions
+    # ------------------------------------------
+    #
+    # contents: read
+    #
+    # Allows the workflow to read repository
+    # contents.
+    #
+    # packages: write
+    #
+    # Allows the workflow to publish Docker
+    # images to GitHub Container Registry.
+    #
+    # ------------------------------------------
+
+    permissions:
+      contents: read
+      packages: write
+
+
+    # ------------------------------------------
+    # Wait for Docker build job
+    # ------------------------------------------
 
     needs:
       - docker-build
 
+
     steps:
+
+      # ------------------------------------------
+      # Checkout repository
+      # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
+
+
+      # ======================================================
+      # BUILD BACKEND IMAGE FOR SECURITY SCANNING
+      # ======================================================
+      #
+      # This job runs on a different GitHub runner
+      # from docker-build.
+      #
+      # Therefore the previous job's local Docker
+      # image is NOT available here.
+      #
+      # We rebuild the image on this runner.
+      #
+      # The image gets the same Git SHA tag that
+      # we will eventually publish to GHCR.
+      #
+      # ======================================================
 
       - name: Build Backend Image
         run: |
           docker build \
-            -t taskflow-backend:scan \
+            -t ghcr.io/hridyen/taskflow-backend:${{ github.sha }} \
             ./backend
+
+
+      # ======================================================
+      # BUILD FRONTEND IMAGE FOR SECURITY SCANNING
+      # ======================================================
 
       - name: Build Frontend Image
         run: |
           docker build \
             --build-arg VITE_API_URL=/api \
-            -t taskflow-frontend:scan \
+            -t ghcr.io/hridyen/taskflow-frontend:${{ github.sha }} \
             ./frontend
+
+
+      # ======================================================
+      # TRIVY — BACKEND SECURITY SCAN
+      # ======================================================
+      #
+      # Trivy scans the backend Docker image.
+      #
+      # CRITICAL and HIGH vulnerabilities are treated
+      # as pipeline failures.
+      #
+      # exit-code: 1 means:
+      #
+      # vulnerability found → command exits with 1
+      #                       → GitHub Actions job fails
+      #
+      # ======================================================
 
       - name: Scan Backend Image
         uses: aquasecurity/trivy-action@v0.36.0
+
         with:
-          image-ref: taskflow-backend:scan
+          image-ref: ghcr.io/hridyen/taskflow-backend:${{ github.sha }}
           format: table
           severity: CRITICAL,HIGH
           exit-code: 1
 
+
+      # ======================================================
+      # TRIVY — FRONTEND SECURITY SCAN
+      # ======================================================
+      #
+      # Same security gate for the frontend image.
+      #
+      # ======================================================
+
       - name: Scan Frontend Image
         uses: aquasecurity/trivy-action@v0.36.0
+
         with:
-          image-ref: taskflow-frontend:scan
+          image-ref: ghcr.io/hridyen/taskflow-frontend:${{ github.sha }}
           format: table
           severity: CRITICAL,HIGH
           exit-code: 1
+
+
+      # ======================================================
+      # GHCR LOGIN
+      # ======================================================
+      #
+      # This step happens ONLY after both Trivy scans
+      # have successfully completed.
+      #
+      # registry:
+      #
+      # GitHub Container Registry
+      #
+      # username:
+      #
+      # GitHub username of the person/workflow
+      # triggering the action.
+      #
+      # password:
+      #
+      # GitHub's automatically generated GITHUB_TOKEN.
+      #
+      # We don't hard-code a password or PAT.
+      #
+      # ======================================================
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+
+      # ======================================================
+      # PUSH BACKEND IMAGE TO GHCR
+      # ======================================================
+      #
+      # The image is pushed using the Git SHA.
+      #
+      # Example:
+      #
+      # ghcr.io/hridyen/taskflow-backend:a3e8ee2...
+      #
+      # ======================================================
+
+      - name: Push Backend Image
+        run: |
+          docker push \
+            ghcr.io/hridyen/taskflow-backend:${{ github.sha }}
+
+
+      # ======================================================
+      # PUSH FRONTEND IMAGE TO GHCR
+      # ======================================================
+      #
+      # Example:
+      #
+      # ghcr.io/hridyen/taskflow-frontend:a3e8ee2...
+      #
+      # ======================================================
+
+      - name: Push Frontend Image
+        run: |
+          docker push \
+            ghcr.io/hridyen/taskflow-frontend:${{ github.sha }}

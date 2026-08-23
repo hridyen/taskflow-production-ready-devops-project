@@ -1,0 +1,109 @@
+# ==========================================
+# TaskFlow Continuous Deployment (CD)
+# ==========================================
+#
+# Flow:
+#
+# GitHub Push
+#      ↓
+# CI succeeds
+#      ↓
+# SSH into EC2
+#      ↓
+# Pull latest deployment configuration
+#      ↓
+# Pull GHCR images using Git SHA
+#      ↓
+# docker compose up -d
+#      ↓
+# Deployment Verification
+#      ↓
+# /api/db-health → 200
+# /api/tasks     → 200
+#
+# ==========================================
+
+name: TaskFlow CD
+
+on:
+  workflow_run:
+    workflows: ["TaskFlow CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+
+  # ==========================================
+  # Deployment Job
+  # ==========================================
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    # Only deploy when CI completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+
+      # ------------------------------------------
+      # Step 1: Checkout the exact commit
+      # ------------------------------------------
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ------------------------------------------
+      # Step 2: Configure SSH
+      # ------------------------------------------
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/taskflow_cd
+          chmod 600 ~/.ssh/taskflow_cd
+
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      # ------------------------------------------
+      # Step 3: Deploy to EC2
+      # ------------------------------------------
+      - name: Deploy Application
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          ssh -i ~/.ssh/taskflow_cd \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd ~/taskflow-production-ready-devops-project && \
+             git pull origin main && \
+             export IMAGE_TAG=${IMAGE_TAG} && \
+             docker compose pull && \
+             docker compose up -d"
+
+      # ------------------------------------------
+      # Step 4: Deployment Verification
+      # ------------------------------------------
+      - name: Verify Deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          echo "Waiting for application to become healthy..."
+
+          sleep 15
+
+          DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "http://${DEPLOY_HOST}/api/db-health")
+
+          TASK_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "http://${DEPLOY_HOST}/api/tasks")
+
+          echo "DB Health HTTP Status: ${DB_STATUS}"
+          echo "Tasks HTTP Status: ${TASK_STATUS}"
+
+          if [ "$DB_STATUS" != "200" ] || [ "$TASK_STATUS" != "200" ]; then
+            echo "Deployment verification failed"
+            exit 1
+          fi
+
+          echo " Deployment verification passed"

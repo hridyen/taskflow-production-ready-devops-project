@@ -33,7 +33,7 @@ services:
     # Health check definition: ensures Postgres is fully ready to accept connections
     # before dependent services (like the backend) attempt to start up.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d taskflow"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10

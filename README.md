@@ -126,6 +126,10 @@ taskflow/
 │       ├── vpc/
 │       ├── security_groups/
 │       └── ec2/
+├── scripts/
+│   ├── setup.sh
+│   ├── deploy.sh
+│   └── health-check.sh
 ├── secrets/
 ├── docker-compose.yml
 ├── .env.example
@@ -144,6 +148,10 @@ For direct navigation, you can access individual project files and directories h
   - [`modules/vpc/`](file:///home/devopsuser/taskflow/infrastructure/modules/vpc)
   - [`modules/security_groups/`](file:///home/devopsuser/taskflow/infrastructure/modules/security_groups)
   - [`modules/ec2/`](file:///home/devopsuser/taskflow/infrastructure/modules/ec2)
+- [`scripts/`](file:///home/devopsuser/taskflow/scripts)
+  - [`setup.sh`](file:///home/devopsuser/taskflow/scripts/setup.sh)
+  - [`deploy.sh`](file:///home/devopsuser/taskflow/scripts/deploy.sh)
+  - [`health-check.sh`](file:///home/devopsuser/taskflow/scripts/health-check.sh)
 - [`secrets/`](file:///home/devopsuser/taskflow/secrets)
 - [`docker-compose.yml`](file:///home/devopsuser/taskflow/docker-compose.yml)
 - [`.env.example`](file:///home/devopsuser/taskflow/.env.example)
@@ -288,33 +296,25 @@ The VPS deployment is provider-independent. The same application can run on a co
    ```
    *Note: The SSH username may differ depending on the VPS provider.*
 
-2. Install the required packages:
-   ```bash
-   sudo apt update
-   sudo apt install -y ca-certificates curl gnupg lsb-release git
-   ```
-   Install Docker using the official Docker repository guidelines. After installation, enable and start the service:
-   ```bash
-   sudo systemctl enable docker
-   sudo systemctl start docker
-   ```
-   Allow the current user to run Docker commands without `sudo`:
-   ```bash
-   sudo usermod -aG docker $USER
-   ```
-   Log out and reconnect so that the group membership changes take effect. Verify the versions:
-   ```bash
-   docker --version
-   docker compose version
-   ```
-
-3. Clone the repository:
+2. Clone the repository:
    ```bash
    git clone https://github.com/hridyen/taskflow-production-ready-devops-project.git
    cd taskflow-production-ready-devops-project
    ```
 
-4. Configure the environment variables:
+3. Run the setup script to install system packages, Docker, and configure permissions:
+   ```bash
+   ./scripts/setup.sh
+   ```
+
+4. Log out of the SSH session and log back in to apply Docker group permission changes:
+   ```bash
+   exit
+   ssh ubuntu@YOUR_VPS_IP
+   cd taskflow-production-ready-devops-project
+   ```
+
+5. Configure the environment variables:
    ```bash
    cp .env.example .env
    nano .env
@@ -328,30 +328,22 @@ The VPS deployment is provider-independent. The same application can run on a co
    ```
    Configure the production `CORS_ORIGIN` according to the domain being used.
 
-5. Configure the database secret:
+6. Configure the database secret:
    ```bash
    mkdir -p secrets
    echo 'YOUR_STRONG_DATABASE_PASSWORD' > secrets/db_password
    chmod 600 secrets/db_password
    ```
 
-6. Start the application:
-   - If using pre-built images:
-     ```bash
-     docker compose pull
-     docker compose up -d
-     ```
-   - If building from source:
-     ```bash
-     docker compose build
-     docker compose up -d
-     ```
+7. Run the deployment script to build images and start services:
+   ```bash
+   ./scripts/deploy.sh
+   ```
 
-7. Verify the installation:
+8. Verify the installation:
    ```bash
    docker compose ps
-   curl -i http://localhost/api/db-health
-   curl -i http://localhost/api/tasks
+   ./scripts/health-check.sh
    ```
    Access the application using `http://YOUR_VPS_PUBLIC_IP`.
    
@@ -561,6 +553,7 @@ After deployment, verify the following checklist:
   - `taskflow-nginx`
 
 #### Database & API
+- [ ] Running [`./scripts/health-check.sh`](file:///home/devopsuser/taskflow/scripts/health-check.sh) reports `TaskFlow is HEALTHY`.
 - [ ] `curl -i http://localhost/api/db-health` returns `200 OK`.
 - [ ] `curl -i http://localhost/api/tasks` returns `200 OK`.
 

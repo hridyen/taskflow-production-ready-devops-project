@@ -111,22 +111,20 @@ jobs:
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
             '
               if [ ! -d ~/taskflow-production-ready-devops-project/.git ]; then
-
-                rm -rf ~/taskflow-production-ready-devops-project
-
-                git clone \
-                  https://github.com/hridyen/taskflow-production-ready-devops-project.git \
-                  ~/taskflow-production-ready-devops-project
-
-              else
-
                 cd ~/taskflow-production-ready-devops-project
 
-                git fetch origin
+                git init
+                git remote add origin https://github.com/hridyen/taskflow-production-ready-devops-project.git
 
+                git fetch origin main
+                git checkout -B main
                 git reset --hard origin/main
+              else
+                cd ~/taskflow-production-ready-devops-project
 
-              fi
+                git fetch origin main
+                git reset --hard origin/main
+              fi  
             '
 
 

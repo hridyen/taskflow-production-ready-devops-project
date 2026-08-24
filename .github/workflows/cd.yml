@@ -10,9 +10,13 @@
 #      ↓
 # SSH into EC2
 #      ↓
-# Pull latest deployment configuration
+# Clone / Update deployment repository
 #      ↓
-# Pull GHCR images using Git SHA
+# Create runtime secrets
+#      ↓
+# Authenticate with GHCR
+#      ↓
+# Pull Docker images using Git SHA
 #      ↓
 # docker compose up -d
 #      ↓
@@ -25,6 +29,11 @@
 
 name: TaskFlow CD
 
+
+# ==========================================
+# Workflow Trigger
+# ==========================================
+
 on:
   workflow_run:
     workflows: ["TaskFlow CI"]
@@ -33,40 +42,126 @@ on:
     branches:
       - main
 
+
+# ==========================================
+# Deployment Job
+# ==========================================
+
 jobs:
 
-  # ==========================================
-  # Deployment Job
-  # ==========================================
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
 
-    # Only deploy when CI completed successfully
+    # Deploy ONLY when CI succeeds
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     steps:
 
       # ------------------------------------------
-      # Step 1: Checkout the exact commit
+      # Step 1: Checkout Repository
       # ------------------------------------------
+
       - name: Checkout Code
         uses: actions/checkout@v4
+
 
       # ------------------------------------------
       # Step 2: Configure SSH
       # ------------------------------------------
+
       - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/taskflow_cd
+
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/taskflow_cd
+
           chmod 600 ~/.ssh/taskflow_cd
 
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-            # ------------------------------------------
-      # Step 3: Deploy to EC2
+
       # ------------------------------------------
+      # Step 3: Prepare Deployment Server
+      # ------------------------------------------
+
+      - name: Prepare EC2
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/taskflow_cd \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'mkdir -p ~/taskflow-production-ready-devops-project/secrets'
+
+
+      # ------------------------------------------
+      # Step 4: Clone / Update Repository
+      # ------------------------------------------
+
+      - name: Update Repository
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/taskflow_cd \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            '
+              if [ ! -d ~/taskflow-production-ready-devops-project/.git ]; then
+
+                rm -rf ~/taskflow-production-ready-devops-project
+
+                git clone \
+                  https://github.com/hridyen/taskflow-production-ready-devops-project.git \
+                  ~/taskflow-production-ready-devops-project
+
+              else
+
+                cd ~/taskflow-production-ready-devops-project
+
+                git fetch origin
+
+                git reset --hard origin/main
+
+              fi
+            '
+
+
+      # ------------------------------------------
+      # Step 5: Create Database Secret
+      # ------------------------------------------
+      #
+      # DB_PASSWORD comes from GitHub Actions Secrets.
+      # It is NEVER committed to Git.
+      #
+      # ------------------------------------------
+
+      - name: Configure Database Secret
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          printf '%s' "$DB_PASSWORD" | \
+          ssh -i ~/.ssh/taskflow_cd \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            '
+              mkdir -p ~/taskflow-production-ready-devops-project/secrets
+
+              cat > ~/taskflow-production-ready-devops-project/secrets/db_password
+
+              chmod 600 \
+                ~/taskflow-production-ready-devops-project/secrets/db_password
+            '
+
+
+      # ------------------------------------------
+      # Step 6: Deploy Application
+      # ------------------------------------------
+
       - name: Deploy Application
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -75,22 +170,21 @@ jobs:
         run: |
           ssh -i ~/.ssh/taskflow_cd \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "if [ ! -d ~/taskflow-production-ready-devops-project/.git ]; then
-               rm -rf ~/taskflow-production-ready-devops-project
-               git clone https://github.com/hridyen/taskflow-production-ready-devops-project.git ~/taskflow-production-ready-devops-project
-             else
-               cd ~/taskflow-production-ready-devops-project
-               git pull origin main
-             fi
+            "
+              cd ~/taskflow-production-ready-devops-project
 
-             cd ~/taskflow-production-ready-devops-project
-             export IMAGE_TAG=${IMAGE_TAG}
-             docker compose pull
-             docker compose up -d"
+              export IMAGE_TAG=${IMAGE_TAG}
+
+              docker compose pull
+
+              docker compose up -d
+            "
+
 
       # ------------------------------------------
-      # Step 4: Deployment Verification
+      # Step 7: Deployment Verification
       # ------------------------------------------
+
       - name: Verify Deployment
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -99,18 +193,25 @@ jobs:
 
           sleep 15
 
-          DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          DB_STATUS=$(curl -s \
+            -o /dev/null \
+            -w "%{http_code}" \
             "http://${DEPLOY_HOST}/api/db-health")
 
-          TASK_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          TASK_STATUS=$(curl -s \
+            -o /dev/null \
+            -w "%{http_code}" \
             "http://${DEPLOY_HOST}/api/tasks")
 
           echo "DB Health HTTP Status: ${DB_STATUS}"
           echo "Tasks HTTP Status: ${TASK_STATUS}"
 
           if [ "$DB_STATUS" != "200" ] || [ "$TASK_STATUS" != "200" ]; then
+
             echo "Deployment verification failed"
+
             exit 1
+
           fi
 
-          echo " Deployment verification passed"
+          echo "Deployment verification passed"

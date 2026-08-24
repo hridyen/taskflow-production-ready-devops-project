@@ -64,7 +64,7 @@ jobs:
 
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
-      # ------------------------------------------
+            # ------------------------------------------
       # Step 3: Deploy to EC2
       # ------------------------------------------
       - name: Deploy Application
@@ -75,10 +75,17 @@ jobs:
         run: |
           ssh -i ~/.ssh/taskflow_cd \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "cd ~/taskflow-production-ready-devops-project && \
-             git pull origin main && \
-             export IMAGE_TAG=${IMAGE_TAG} && \
-             docker compose pull && \
+            "if [ ! -d ~/taskflow-production-ready-devops-project/.git ]; then
+               rm -rf ~/taskflow-production-ready-devops-project
+               git clone https://github.com/hridyen/taskflow-production-ready-devops-project.git ~/taskflow-production-ready-devops-project
+             else
+               cd ~/taskflow-production-ready-devops-project
+               git pull origin main
+             fi
+
+             cd ~/taskflow-production-ready-devops-project
+             export IMAGE_TAG=${IMAGE_TAG}
+             docker compose pull
              docker compose up -d"
 
       # ------------------------------------------

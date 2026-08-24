@@ -26,3 +26,10 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+
+terraform.tfvars
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*

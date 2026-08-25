@@ -1,0 +1,53 @@
+groups:
+  - name: taskflow-alerts
+    rules:
+
+      # Backend is unreachable
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "TaskFlow backend is down"
+          description: "The TaskFlow backend has been unreachable for more than 1 minute."
+
+
+      # Host CPU > 80%
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage has been above 80% for more than 5 minutes."
+
+      # Host memory > 80%
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage has been above 80% for more than 5 minutes."
+
+      # HTTP 5xx error rate > 5%
+      - alert: HighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count[5m]))
+          ) * 100 > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "More than 5% of backend requests are returning HTTP 5xx responses."

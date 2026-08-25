@@ -136,12 +136,116 @@ services:
       - frontend
       - backend
 
+  # ----------------------------------------------------
+  # 5. Monitoring Service: Prometheus
+  # ----------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: taskflow-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+      - cadvisor
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 6. Monitoring Service: Node Exporter
+  # ----------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: taskflow-node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 7. Monitoring Service: cAdvisor
+  # ----------------------------------------------------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: taskflow-cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 8. Monitoring Service: Grafana
+  # ----------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: taskflow-grafana
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 9. Logging Service: Loki
+  # ----------------------------------------------------
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: taskflow-loki
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/tmp/loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  # ----------------------------------------------------
+  # 10. Logging Service: Promtail
+  # ----------------------------------------------------
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: taskflow-promtail
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
 
 # ----------------------------------------------------
 # Shared Volumes & Secret Definitions
 # ----------------------------------------------------
 volumes:
   postgres_data: # Database persistent storage volume
+  prometheus_data:
+  grafana_data:
+  loki_data:
 
 secrets:
   db_password:

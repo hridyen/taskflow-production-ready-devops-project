@@ -7,6 +7,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const client = require('prom-client'); // Import prom-client
 require('dotenv').config(); // Load environment variables from .env file
 
 const taskRoutes = require('./routes/taskRoutes');
@@ -15,6 +16,39 @@ const db = require('./databse'); // Import database configuration
 const app = express();
 // Default port is set to 9001. This is exposed in the Docker container and proxied by Nginx
 const PORT = process.env.PORT || 9001;
+
+// ----------------------------------------------------
+// Prometheus Metrics Setup
+// ----------------------------------------------------
+const register = new client.Registry();
+client.collectDefaultMetrics({ register });
+
+// Define custom metrics
+const httpRequestDurationSeconds = new client.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'Duration of HTTP requests in seconds',
+  labelNames: ['method', 'route', 'status_code'],
+  buckets: [0.1, 0.3, 0.5, 0.7, 1, 3, 5, 7, 10]
+});
+register.registerMetric(httpRequestDurationSeconds);
+
+// Request duration middleware
+app.use((req, res, next) => {
+  const start = process.hrtime();
+  res.on('finish', () => {
+    const duration = process.hrtime(start);
+    const durationInSeconds = duration[0] + duration[1] / 1e9;
+    
+    // Avoid scraping loop pollution
+    if (req.path !== '/metrics') {
+      const route = req.route ? req.route.path : req.path;
+      httpRequestDurationSeconds
+        .labels(req.method, route || req.path, res.statusCode)
+        .observe(durationInSeconds);
+    }
+  });
+  next();
+});
 
 // ----------------------------------------------------
 // Global Middleware Config
@@ -69,6 +103,16 @@ app.get('/api/db-health', async (req, res) => {
       error: error.message,
       timestamp: new Date().toISOString()
     });
+  }
+});
+
+// Prometheus Metrics endpoint - internally queried by Prometheus scraper
+app.get('/metrics', async (req, res) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    res.status(500).end(err);
   }
 });
 

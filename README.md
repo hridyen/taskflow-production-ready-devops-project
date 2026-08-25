@@ -15,6 +15,7 @@ TaskFlow is a production-oriented full-stack task management application deploye
 - [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
+- [Observability Stack (Monitoring, Logging & Alerting)](#observability-stack-monitoring-logging--alerting)
 - [Future Improvements](#future-improvements)
 - [Operational Lifecycle](#operational-lifecycle)
 
@@ -664,11 +665,11 @@ docker compose logs postgres --tail=100
 
 ---
 
-## Future Improvements
+## Observability Stack (Monitoring, Logging & Alerting)
 
-The current deployment establishes the infrastructure, containerization, and CI/CD foundation. The following improvements are planned:
+The project includes a comprehensive, production-grade observability and alerting stack deployed with Docker Compose. This stack collects, stores, visualizes, and alerts on system, container, and application metrics and logs.
 
-### Production Observability
+### 1. Observability Architecture
 
 ```mermaid
 graph TD
@@ -697,16 +698,49 @@ graph TD
     Loki --> Grafana
 ```
 
-Planned capabilities include:
-- EC2 resource monitoring
-- Container metrics
-- Application metrics
-- CPU and memory monitoring
-- Disk monitoring
-- Centralized logs
-- Grafana dashboards
-- Alerting
-- Service health monitoring
+### 2. Services and Configurations
+
+The stack orchestrates the following components:
+
+| Service | Image | Internal Scrape Target | Purpose / Data Captured |
+| :--- | :--- | :--- | :--- |
+| `prometheus` | `prom/prometheus:v3.1.0` | `http://localhost:9090` | Time-series database that pulls host, container, and app metrics. Configured in [`prometheus.yml`](file:///home/devopsuser/taskflow/monitoring/prometheus/prometheus.yml) with alert rules mounted from [`taskflow-alerts.yml`](file:///home/devopsuser/taskflow/monitoring/prometheus/rules/taskflow-alerts.yml). |
+| `node-exporter` | `prom/node-exporter:v1.8.1` | `http://node-exporter:9100/metrics` | Gathers system resource metrics (CPU load, memory allocation, network I/O, disk activity). |
+| `cadvisor` | `gcr.io/cadvisor/cadvisor:v0.49.1` | `http://cadvisor:8080/metrics` | Collects container resource usage stats directly from the Docker daemon (privileged read access). |
+| `backend` (Express) | Custom Build | `http://backend:9001/metrics` | Instrumented with `prom-client` to capture default Node runtime metrics and custom HTTP request durations. |
+| `loki` | `grafana/loki:3.0.0` | `http://loki:3100` | Log aggregation engine that stores and indexes container log outputs. Configured in [`loki-config.yml`](file:///home/devopsuser/taskflow/monitoring/loki/loki-config.yml). |
+| `promtail` | `grafana/promtail:3.0.0` | `http://promtail:9080` | Log agent that connects to the host's `/var/run/docker.sock` to auto-discover all running containers and push their logs to Loki. Configured in [`promtail-config.yml`](file:///home/devopsuser/taskflow/monitoring/promtail/promtail-config.yml). |
+| `grafana` | `grafana/grafana:11.0.0` | Exposes Port `3000` | Visualization dashboard pre-configured with default Prometheus and Loki data sources, and the "TaskFlow Infrastructure & Application Metrics" dashboard. |
+
+### 3. Alerting Rules
+
+Prometheus alerts are defined in [`taskflow-alerts.yml`](file:///home/devopsuser/taskflow/monitoring/prometheus/rules/taskflow-alerts.yml) and trigger notifications based on these rules:
+
+- **`BackendDown` (Critical):** Triggered if the backend API container is down/unreachable (`up{job="backend"} == 0`) for more than 1 minute.
+- **`HighCPUUsage` (Warning):** Triggered if system CPU usage goes above 80% for more than 5 minutes.
+- **`HighMemoryUsage` (Warning):** Triggered if system Memory usage goes above 80% for more than 5 minutes.
+- **`HighHTTPErrorRate` (Warning):** Triggered if more than 5% of all HTTP requests return `5xx` responses in a 5-minute window.
+
+### 4. Running and Accessing Observability
+
+1. **Start the Stack:**
+   When starting the Docker Compose orchestration, the monitoring, logging, and alerting services spin up automatically:
+   ```bash
+   docker compose up -d
+   ```
+2. **Accessing Grafana:**
+   - URL: `http://<your-host-ip>:3000` (or `http://localhost:3000` for local development)
+   - Credentials: Username `admin`, Password `admin` (change password upon first login).
+   - Pre-loaded Dashboard: Select "Dashboards" and click on the "TaskFlow Infrastructure & Application Metrics" dashboard.
+   - Searching Logs: Go to "Explore", select "Loki", and query logs by label, for example: `{container="taskflow-backend"}`.
+3. **Checking Prometheus Targets:**
+   - URL: `http://localhost:9090/targets` (if exposed locally) to verify connection states for all metrics scrape loops.
+
+---
+
+## Future Improvements
+
+The current deployment establishes the infrastructure, containerization, CI/CD, and production observability foundation. The following improvements are planned:
 
 ### Additional Infrastructure Improvements
 
